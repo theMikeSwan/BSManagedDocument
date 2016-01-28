@@ -608,7 +608,9 @@
 #endif
                     _contents = nil;
                     
-                    activityCompletionHandler();
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        activityCompletionHandler();
+                    });
                 }];
             }
             else
@@ -629,8 +631,10 @@
             
 			
 			// And can finally declare we're done
-            fileAccessCompletionHandler();
-            if (completionHandler) completionHandler(error);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                fileAccessCompletionHandler();
+                if (completionHandler) completionHandler(error);
+            });
         }];
     }];
 }
