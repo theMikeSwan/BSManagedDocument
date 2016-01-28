@@ -1,6 +1,6 @@
 Pod::Spec.new do |spec|
   spec.name         = 'BSManagedDocument'
-  spec.version      = '0.3.2'
+  spec.version      = '0.3.3'
   spec.license      = { :type => 'BSD' }
   spec.homepage     = 'https://github.com/karelia/BSManagedDocument'
   spec.authors      = {
@@ -24,5 +24,5 @@ EOF
   spec.source       = { :git => 'https://github.com/karelia/BSManagedDocument.git', :tag => 'v0.3.2' }
   spec.platform     = :osx, "10.6"
   spec.source_files = 'BSManagedDocument.{h,m}'
-  spec.requires_arc = false
+  spec.requires_arc = true
 end
