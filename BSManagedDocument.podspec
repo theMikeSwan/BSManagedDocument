@@ -1,8 +1,15 @@
-Pod::Spec.new do |s|
-  s.name         = "BSManagedDocument"
-  s.version      = "0.3"
-  s.summary      = "Brings UIManagedDocument's design to OS X."
-  s.description  = "A document class that mimics `UIManagedDocument` to support Core Data in all its modern glory:
+Pod::Spec.new do |spec|
+  spec.name         = 'BSManagedDocument'
+  spec.version      = '0.3.2'
+  spec.license      = { :type => 'BSD' }
+  spec.homepage     = 'https://github.com/karelia/BSManagedDocument'
+  spec.authors      = {
+    'Mike Abdullah' => 'me@mikeabdullah.net',
+    'Sasmito Adibowo' => 'adib@basil-salad.com',
+  }
+  spec.summary      = "Brings UIManagedDocument's design to OS X."
+  spec.description  = <<EOF
+    A document class that mimics `UIManagedDocument` to support Core Data in all its modern glory:
 
   *   Saves to a file package.
   *   On 10.7+, asynchronous saving is supported. We set up a parent/child pair of contexts; the parent saves on its own thread.
@@ -13,12 +20,9 @@ Pod::Spec.new do |s|
   *   If the document moves on disk, Core Data is kept informed of the new location.
   *   If multiple validation errors occur during saving, the presented error is adjusted to make debugging a little easier.
   *   And of course, full support for Autosave-In-Place and Versions.
-  "
-
-  s.homepage     = "https://github.com/karelia/BSManagedDocument"
-  s.license      = 'BSD'
-  s.authors      = { "Mike Abdullah" => "me@mikeabdullah.net", "Sasmito Adibowo" => "adib@basil-salad.com" }
-  s.source       = { :git => "https://github.com/karelia/BSManagedDocument.git", :tag => "v0.3" }
-  s.platform     = :osx, '10.6'
-  s.source_files = 'BSManagedDocument.h', 'BSManagedDocument.m'
+EOF
+  spec.source       = { :git => 'https://github.com/karelia/BSManagedDocument.git', :tag => 'v0.3.2' }
+  spec.platform     = :osx, "10.6"
+  spec.source_files = 'BSManagedDocument.{h,m}'
+  spec.requires_arc = false
 end
