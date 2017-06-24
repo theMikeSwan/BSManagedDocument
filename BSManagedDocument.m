@@ -22,6 +22,7 @@
 
 #import <objc/message.h>
 
+NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotification" ;
 
 @interface BSManagedDocument ()
 @property(nonatomic, copy) NSURL *autosavedContentsTempDirectoryURL;
@@ -69,10 +70,15 @@
             }
         }
         
-        [self setManagedObjectContext:context];
+        if ([context respondsToSelector:@selector(setName:)]) {
+            [self setManagedObjectContext:context];
+            NSString* name = [[NSString alloc] initWithFormat:@"MOC of %@", self.fileURL.lastPathComponent];
+            [context setName:name];
 #if ! __has_feature(objc_arc)
-        [context release];
+            [name release];
+            [context release];
 #endif
+        }
     }
     
     return _managedObjectContext;
@@ -114,7 +120,11 @@
     [coordinator release];  // context hangs onto it for us
 #endif
     
-    [super setUndoManager:[context undoManager]]; // has to be super as we implement -setUndoManager: to be a no-op
+    [context performBlock:^(void)
+     {
+         NSUndoManager *undoManager = [context undoManager];
+         [super setUndoManager:undoManager]; // has to be super as we implement -setUndoManager: to be a no-op
+     }] ;
 }
 
 // Having this method is a bit of a hack for Sandvox's benefit. I intend to remove it in favour of something neater
@@ -138,9 +148,19 @@
                                            ofType:(NSString *)fileType
                                modelConfiguration:(NSString *)configuration
                                      storeOptions:(NSDictionary *)storeOptions
-                                            error:(NSError **)error
+                                            error:(NSError **)error_p
 {
-	NSManagedObjectContext *context = self.managedObjectContext;
+    // I was getting a crash on launch, in OS X 10.11, when previously-opened
+    //  document was attempted to be reopened (for "state restoration") by
+    // -[NSDocumentController reopenDocumentForURL:withContentsOfURL:display:completionHandler:],
+    // if said document could not be migrated because it was of an unsupported
+    // previous data model version.  (Yes, this is an edge edge case).
+    // The crashing seemed to be fixed after I introduced the following local
+    // 'error' variable to isolate it from the out NSError**.  My project uses
+    // ARC.
+    // Jerry Krinock 2016-Mar-14.
+    NSError* __block error = nil ;
+    NSManagedObjectContext *context = self.managedObjectContext;
 
     // Adding a persistent store will post a notification. If your app already has an
     // NSObjectController (or subclass) setup to the context, it will react to that notification,
@@ -155,7 +175,7 @@
 													configuration:configuration
 															  URL:storeURL
 														  options:storeOptions
-															error:error];
+															error:&error];
 		}];
 	}
 	else {
@@ -165,12 +185,17 @@
 												configuration:configuration
 														  URL:storeURL
 													  options:storeOptions
-														error:error];
+														error:&error];
 	}
 
 #if ! __has_feature(objc_arc)
 	[_store retain];
 #endif
+    
+    if (error && error_p)
+    {
+        *error_p = error;
+    }
 
 	return (_store != nil);
 }
@@ -238,6 +263,7 @@
     [_managedObjectContext release];
     [_managedObjectModel release];
     [_store release];
+    [_autosavedContentsTempDirectoryURL release];
     
     // _additionalContent is unretained so shouldn't be released here
     
@@ -588,7 +614,7 @@
         
         
         // Stash contents temporarily into an ivar so -writeToURL:… can access it from the worker thread
-        NSError *error;
+        NSError *error = nil ;
         _contents = [self contentsForURL:url ofType:typeName saveOperation:saveOperation error:&error];
         
         if (!_contents)
@@ -653,6 +679,10 @@
     }];
 }
 
+#if MAC_OS_X_VERSION_MAX_ALLOWED < 101300
+/* Documentation says that this method was deprecated in macOS 10.7, but I did
+ not get any compiler warnings until compiling with 10.13 SDK.  Oh, well; the
+ above #if is to avoid the warning. */
 - (BOOL)saveToURL:(NSURL *)url ofType:(NSString *)typeName forSaveOperation:(NSSaveOperationType)saveOperation error:(NSError **)outError;
 {
     BOOL result = [super saveToURL:url ofType:typeName forSaveOperation:saveOperation error:outError];
@@ -665,6 +695,7 @@
     
     return result;
 }
+#endif
 
 /*	Regular Save operations can write directly to the existing document since Core Data provides atomicity for us
  */
@@ -673,6 +704,9 @@
 		forSaveOperation:(NSSaveOperationType)saveOperation
 				   error:(NSError **)outError
 {
+    BOOL result = NO ;
+    BOOL done = NO ;
+    
     // It's possible subclassers support more file types than the Core Data package-based one
     // BSManagedDocument supplies. e.g. an alternative format for exporting, say. If so, they don't
     // want our custom logic kicking in when writing it, so test for that as best we can.
@@ -715,11 +749,11 @@
 			
             // NSDocument attempts to write a copy of the document out at a temporary location.
             // Core Data cannot support this, so we override it to save directly.
-            BOOL result = [self writeToURL:absoluteURL
-                                    ofType:typeName
-                          forSaveOperation:saveOperation
-                       originalContentsURL:[self fileURL]
-                                     error:outError];
+            result = [self writeToURL:absoluteURL
+                               ofType:typeName
+                     forSaveOperation:saveOperation
+                  originalContentsURL:[self fileURL]
+                                error:outError];
             
             
             if (!result)
@@ -750,20 +784,38 @@
                 }
             }
             
-            return result;
+            done = YES;
         }
     }
     
-    // Other situations are basically fine to go through the regular channels
-    return [super writeSafelyToURL:absoluteURL
-                            ofType:typeName
-                  forSaveOperation:saveOperation
-                             error:outError];
+    if (!done) {
+        // Other situations are basically fine to go through the regular channels
+        result = [super writeSafelyToURL:absoluteURL
+                                  ofType:typeName
+                        forSaveOperation:saveOperation
+                                   error:outError];
+    }
+    
+    if (result) {
+        NSNotification* note = [[NSNotification alloc] initWithName:BSManagedDocumentDidSaveNotification
+                                                             object:self
+                                                           userInfo:nil] ;
+        [[NSNotificationCenter defaultCenter] performSelectorOnMainThread:@selector(postNotification:)
+                                                               withObject:note
+                                                            waitUntilDone:NO] ;
+#if ! __has_feature(objc_arc)
+        [note release];
+#endif
+                                                            
+    }
+    
+    return result ;
 }
 
 - (BOOL)writeBackupToURL:(NSURL *)backupURL error:(NSError **)outError;
 {
     NSURL *source = self.mostRecentlySavedFileURL;
+    /* The following also copies any additional content in the package. */
 	return [[NSFileManager defaultManager] copyItemAtURL:source toURL:backupURL error:outError];
 }
 
@@ -1027,10 +1079,22 @@ originalContentsURL:(NSURL *)originalContentsURL
     
     void (^completionHandler)(BOOL) = ^(BOOL shouldClose) {
         if (delegate) {
+            /* If the following line won't compile, in your Build Settings
+             set "Enable strict checking of objc_msgSend Calls" to "No".  See
+             https://stackoverflow.com/questions/24922913/too-many-arguments-to-function-call-expected-0-have-3 */
             objc_msgSend(delegate, shouldCloseSelector, self, shouldClose, contextInfo);
         }
     };
     
+    /*
+     There is a bug near here:
+     Click in menu: File > New Subject.
+     Click the red 'Close' button.
+     Next line will deadlock.
+     Sending [self setChangeCount:NSChangeCleared] before that line does not help.
+     To get rid of such a document (which will reappear on any subsequent launch
+     due to state restoration), send here [self close].
+     */
     [super canCloseDocumentWithDelegate:self
                     shouldCloseSelector:@selector(document:didDecideToClose:contextInfo:)
                             contextInfo:Block_copy((__bridge void *)completionHandler)];
@@ -1163,5 +1227,4 @@ originalContentsURL:(NSURL *)originalContentsURL
 }
 
 @end
-
 

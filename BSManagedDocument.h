@@ -52,6 +52,7 @@
 
 #import <Cocoa/Cocoa.h>
 
+extern NSString* BSManagedDocumentDidSaveNotification ;
 
 @interface BSManagedDocument : NSDocument
 {
