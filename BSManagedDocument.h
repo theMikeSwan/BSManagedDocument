@@ -87,6 +87,17 @@ extern NSString* BSManagedDocumentDidSaveNotification ;
 + (NSString *)persistentStoreName;
 
 /**
+ Given the path to a BSManagedDocument on disk, returns the path to its
+ database (SQLite file).
+
+ This is useful if you want to peek in at store metadata, for example.
+
+ @return  Path to the receiver's SQLite database on disk.  If there is a flat
+ file at the given path, that is, if the document is not a package, simply
+ returns the given path. */
++ (NSString *)storePathForDocumentPath:(NSString*)path;
+
+/**
  The receiver's managed object context
  
  Persistent documents always have a managed object context and a persistent
@@ -271,10 +282,5 @@ extern NSString* BSManagedDocumentDidSaveNotification ;
 /* BSManagedDocument supports asynchronous saving on 10.7+ (on earlier releases this method returns NO).
  */
 - (BOOL)canAsynchronouslyWriteToURL:(NSURL *)url ofType:(NSString *)typeName forSaveOperation:(NSSaveOperationType)saveOperation;
-
-/* No-ops
- */
--(void)setUndoManager:(NSUndoManager *)undoManager;
--(void)setHasUndoManager:(BOOL)hasUndoManager;
 
 @end

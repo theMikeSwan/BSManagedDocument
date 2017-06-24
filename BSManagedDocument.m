@@ -36,6 +36,21 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
 + (NSString *)storeContentName; { return @"StoreContent"; }
 + (NSString *)persistentStoreName; { return @"persistentStore"; }
 
++ (NSString *)storePathForDocumentPath:(NSString*)path
+{
+    BOOL isDirectory;
+    [[NSFileManager defaultManager] fileExistsAtPath:path
+                                         isDirectory:&isDirectory];
+    if (isDirectory)
+    {
+        /* path is a file package. */
+        path = [path stringByAppendingPathComponent:[BSManagedDocument storeContentName]];
+        path = [path stringByAppendingPathComponent:[BSManagedDocument persistentStoreName]];
+    }
+
+    return path;
+}
+
 + (NSURL *)persistentStoreURLForDocumentURL:(NSURL *)fileURL;
 {
     NSString *storeContent = [self storeContentName];
@@ -70,15 +85,10 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
             }
         }
         
-        if ([context respondsToSelector:@selector(setName:)]) {
-            [self setManagedObjectContext:context];
-            NSString* name = [[NSString alloc] initWithFormat:@"MOC of %@", self.fileURL.lastPathComponent];
-            [context setName:name];
+        [self setManagedObjectContext:context];
 #if ! __has_feature(objc_arc)
-            [name release];
-            [context release];
+        [context release];
 #endif
-        }
     }
     
     return _managedObjectContext;
@@ -119,12 +129,8 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
 #if !__has_feature(objc_arc)
     [coordinator release];  // context hangs onto it for us
 #endif
-    
-    [context performBlock:^(void)
-     {
-         NSUndoManager *undoManager = [context undoManager];
-         [super setUndoManager:undoManager]; // has to be super as we implement -setUndoManager: to be a no-op
-     }] ;
+
+    // See note JK20170624 at end of file
 }
 
 // Having this method is a bit of a hack for Sandvox's benefit. I intend to remove it in favour of something neater
@@ -1163,14 +1169,7 @@ originalContentsURL:(NSURL *)originalContentsURL
     return result;
 }
 
-#pragma mark Undo
-
-// No-ops, like NSPersistentDocument
-- (void)setUndoManager:(NSUndoManager *)undoManager { }
-- (void)setHasUndoManager:(BOOL)hasUndoManager { }
-
-// Could also implement -hasUndoManager. The NSPersistentDocument docs just say "Returns YES", which you could construe to mean it's overriden there. But I think what it actually means is that the default value for documents is YES, and we've overridden -setHasUndoManager: to be a no-op, so there's no reasonable way for it to return NO
-// Update: Some poking around tells me that NSPersistentDocument does in fact override -hasUndoManager. But what that implementation does, who knows! Perhaps it handles the edge case of the MOC having no undo manager
+// See note JK20170624 at end of file
 
 #pragma mark Error Presentation
 
@@ -1228,3 +1227,25 @@ originalContentsURL:(NSURL *)originalContentsURL
 
 @end
 
+/* Note JK20170624
+
+ I removed code in two places which purportedly sets the document's undo
+ manager as NSPersistentDocument does.  The code I removed creates a managed
+ object context, which initially has nil undo manager, then later copies its
+ nil undo manager to the document.  Result: document has nil undo manager.
+ Furthermore, it overrides the document's -setUndoManager: to be a noop,
+ making it impossible to set a non-nil undo manager later.
+
+ I have not fully tested this in a demo project, although in one project
+ (Veris) it seems to give a nil undo manager, as my analysis predicts.
+ In any case, it is possibly not compatible with my requirement in another
+ project (BkmkMgrs) of using Graham Cox' GCUndoManager instead of
+ NSUndoManager.
+
+ And I do not believe that the code I removed simply behaves the same as
+ NSPersistentDocument, because my BkmkMgrs app had an non-nil undo manager
+ before I simply replaced NSPersistentDocument with out-of-the-box
+ BSManagedDocument.
+
+ Jerry Krinock  2017-06-24
+ */
