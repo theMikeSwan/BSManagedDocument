@@ -54,7 +54,7 @@
 
 extern NSString* BSManagedDocumentDidSaveNotification ;
 
-@interface BSManagedDocument : NSDocument
+__attribute__((visibility("default"))) @interface BSManagedDocument : NSDocument
 {
   @private  // still targeting legacy runtime, so YES, I need to declare the ivars
     NSManagedObjectContext	*_managedObjectContext;
