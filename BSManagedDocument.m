@@ -51,6 +51,28 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
     return path;
 }
 
++ (NSString *)documentPathForStorePath:(NSString*)path
+                     documentExtension:(NSString*)extension
+{
+    NSString* answer = nil;
+    if ([[path pathExtension] isEqualToString:extension])
+    {
+        answer = path;
+    }
+    else if ([[path lastPathComponent] isEqualToString:[self persistentStoreName]]) {
+        path = [path stringByDeletingLastPathComponent];
+        if ([[path lastPathComponent] isEqualToString:[self storeContentName]]) {
+            path = [path stringByDeletingLastPathComponent];
+            if ([[path pathExtension] isEqualToString:extension]) {
+                answer = path;
+            }
+        }
+    }
+
+    return answer;
+}
+
+
 + (NSURL *)persistentStoreURLForDocumentURL:(NSURL *)fileURL;
 {
     NSString *storeContent = [self storeContentName];

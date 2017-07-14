@@ -87,15 +87,29 @@ __attribute__((visibility("default"))) @interface BSManagedDocument : NSDocument
 + (NSString *)persistentStoreName;
 
 /**
- Given the path to a BSManagedDocument on disk, returns the path to its
- database (SQLite file).
+ @brief    Given the path to a BSManagedDocument on disk, returns the path to
+ its database (SQLite file).
 
- This is useful if you want to peek in at store metadata, for example.
+ @details  This is useful if you want to peek in at store metadata, for example.
 
- @return  Path to the receiver's SQLite database on disk.  If there is a flat
- file at the given path, that is, if the document is not a package, simply
+ @return   Path to the SQLite given document's database on disk.  If there is a
+ flat file at the given path, that is, if the document is not a package, simply
  returns the given path. */
 + (NSString *)storePathForDocumentPath:(NSString*)path;
+
+/**
+ @brief    Given the path to the database (SQLite file), returns the path to
+ the document
+
+ @details  This is useful if you are watching a database file for changes and
+ want to know what document changed.  It uses quite a boneheaded algorithm,
+ just looking at the directory structure and for the given document extension.
+
+ @return  If the target document is deemed to be a flat file, returns the
+ given `path`.  If the target document is deemed to be a package, returns the
+ path to the package.  Otherwise, returns nil. */
++ (NSString *)documentPathForStorePath:(NSString*)path
+                     documentExtension:(NSString*)extension;
 
 /**
  The receiver's managed object context
