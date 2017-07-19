@@ -178,15 +178,14 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
                                      storeOptions:(NSDictionary *)storeOptions
                                             error:(NSError **)error_p
 {
-    // I was getting a crash on launch, in OS X 10.11, when previously-opened
-    //  document was attempted to be reopened (for "state restoration") by
-    // -[NSDocumentController reopenDocumentForURL:withContentsOfURL:display:completionHandler:],
-    // if said document could not be migrated because it was of an unsupported
-    // previous data model version.  (Yes, this is an edge edge case).
-    // The crashing seemed to be fixed after I introduced the following local
-    // 'error' variable to isolate it from the out NSError**.  My project uses
-    // ARC.
-    // Jerry Krinock 2016-Mar-14.
+    /* I was getting a crash on launch, in OS X 10.11, when previously-opened
+     document was attempted to be reopened (for "state restoration") by
+     -[NSDocumentController reopenDocumentForURL:withContentsOfURL:display:completionHandler:],
+     if said document could not be migrated because it was of an unsupported
+     previous data model version.  (Yes, this is an edge edge case).
+     The crashing seemed to be fixed after I introduced the following local
+     'error' variable to isolate it from the out NSError**.
+     Jerry Krinock 2016-Mar-14. */
     NSError* __block error = nil ;
     NSManagedObjectContext *context = self.managedObjectContext;
 
@@ -196,28 +195,35 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
     // let's make sure the notification is actually posted on the main thread.
     // Also seems to fix the deadlock in https://github.com/karelia/BSManagedDocument/issues/36
     if ([context respondsToSelector:@selector(performBlockAndWait:)]) {
-		[context performBlockAndWait:^{
-			NSPersistentStoreCoordinator *storeCoordinator = context.persistentStoreCoordinator;
+        [context performBlockAndWait:^{
+            NSPersistentStoreCoordinator *storeCoordinator = context.persistentStoreCoordinator;
 
-			_store = [storeCoordinator addPersistentStoreWithType:[self persistentStoreTypeForFileType:fileType]
-													configuration:configuration
-															  URL:storeURL
-														  options:storeOptions
-															error:&error];
-		}];
-	}
-	else {
-		NSPersistentStoreCoordinator *storeCoordinator = context.persistentStoreCoordinator;
+            _store = [storeCoordinator addPersistentStoreWithType:[self persistentStoreTypeForFileType:fileType]
+                                                    configuration:configuration
+                                                              URL:storeURL
+                                                          options:storeOptions
+                                                            error:&error];
+#if ! __has_feature(objc_arc)
+            [error retain];
+#endif
+        }];
+    }
+    else {
+        NSPersistentStoreCoordinator *storeCoordinator = context.persistentStoreCoordinator;
 
-		_store = [storeCoordinator addPersistentStoreWithType:[self persistentStoreTypeForFileType:fileType]
-												configuration:configuration
-														  URL:storeURL
-													  options:storeOptions
-														error:&error];
-	}
+        _store = [storeCoordinator addPersistentStoreWithType:[self persistentStoreTypeForFileType:fileType]
+                                                configuration:configuration
+                                                          URL:storeURL
+                                                      options:storeOptions
+                                                        error:&error];
+#if ! __has_feature(objc_arc)
+        [error retain];
+#endif
+    }
 
 #if ! __has_feature(objc_arc)
 	[_store retain];
+    [error autorelease];
 #endif
     
     if (error && error_p)
@@ -225,7 +231,7 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
         *error_p = error;
     }
 
-	return (_store != nil);
+    return (_store != nil);
 }
 
 - (BOOL)configurePersistentStoreCoordinatorForURL:(NSURL *)storeURL
