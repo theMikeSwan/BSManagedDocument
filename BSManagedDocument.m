@@ -38,9 +38,12 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
 
 + (NSString *)storePathForDocumentPath:(NSString*)path
 {
-    BOOL isDirectory;
+    BOOL isDirectory = YES;
     [[NSFileManager defaultManager] fileExistsAtPath:path
                                          isDirectory:&isDirectory];
+    /* I added the initialization YES on 20180114 after seeing a runtime
+     warning here, sayig that isDirectory had a "Load of value -96,
+     which is not a valid value for type 'BOOL' (aka 'signed char')". */
     if (isDirectory)
     {
         /* path is a file package. */
