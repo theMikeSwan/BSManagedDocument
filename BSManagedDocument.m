@@ -186,6 +186,7 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
      -[NSDocumentController reopenDocumentForURL:withContentsOfURL:display:completionHandler:],
      if said document could not be migrated because it was of an unsupported
      previous data model version.  (Yes, this is an edge edge case).
+     This happened in two different projects of mine, one ARC, one non-ARC.
      The crashing seemed to be fixed after I introduced the following local
      'error' variable to isolate it from the out NSError**.
      Jerry Krinock 2016-Mar-14. */
@@ -197,7 +198,8 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
     // on the assumption it's posted on the main thread. That could do some very weird things, so
     // let's make sure the notification is actually posted on the main thread.
     // Also seems to fix the deadlock in https://github.com/karelia/BSManagedDocument/issues/36
-    if ([context respondsToSelector:@selector(performBlockAndWait:)]) {
+    if ([context respondsToSelector:@selector(performBlockAndWait:)])
+    {
         [context performBlockAndWait:^{
             NSPersistentStoreCoordinator *storeCoordinator = context.persistentStoreCoordinator;
 
