@@ -393,7 +393,8 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
 
 - (id)contentsForURL:(NSURL *)url ofType:(NSString *)typeName saveOperation:(NSSaveOperationType)saveOperation error:(NSError **)outError;
 {
-    NSAssert([NSThread isMainThread], @"Somehow -%@ has been called off of the main thread (operation %u to: %@)", NSStringFromSelector(_cmd), (unsigned)saveOperation, [url path]);
+    // NSAssert([NSThread isMainThread], @"Somehow -%@ has been called off of the main thread (operation %u to: %@)", NSStringFromSelector(_cmd), (unsigned)saveOperation, [url path]);
+    // See Note JK20180125 below.
     
     // Grab additional content that a subclass might provide
     if (outError) *outError = nil;  // unusually for me, be forgiving of subclasses which forget to fill in the error
@@ -1282,3 +1283,56 @@ originalContentsURL:(NSURL *)originalContentsURL
 
  Jerry Krinock  2017-06-24
  */
+
+/* Note JK20180125
+
+ I've removed the above assertion because it tripped for me when I had
+ enabled asynchronous saving, and I think it is a false alarm.  The call
+ stack was as shown below.  Indeed it was on a secondary thread, because
+ the main thread invoked
+ -[BkmxDoc writeSafelyToURL:ofType:forSaveOperation:error:], which the
+ system called on a secondary thread.  Is that not the whole idea of
+ asynchronous saving?  For macOS 10.7+, this class does return YES for
+ -canAsynchronouslyWriteToURL:::.
+
+ Thread 50 Queue : com.apple.root.default-qos (concurrent)
+ #0    0x00007fff57c3823f in -[NSAssertionHandler handleFailureInMethod:object:file:lineNumber:description:] ()
+ #1    0x00000001002b7e13 in -[BSManagedDocument contentsForURL:ofType:saveOperation:error:] at /Users/jk/Documents/Programming/Projects/BSManagedDocument/BSManagedDocument.m:396
+ #2    0x00000001002b9881 in -[BSManagedDocument writeToURL:ofType:forSaveOperation:originalContentsURL:error:] at /Users/jk/Documents/Programming/Projects/BSManagedDocument/BSManagedDocument.m:872
+ #3    0x00000001002b95da in -[BSManagedDocument writeSafelyToURL:ofType:forSaveOperation:error:] at /Users/jk/Documents/Programming/Projects/BSManagedDocument/BSManagedDocument.m:791
+ #4    0x00000001002e0d41 in -[BkmxDoc writeSafelyToURL:ofType:forSaveOperation:error:] at /Users/jk/Documents/Programming/Projects/BkmkMgrs/BkmxDoc.m:5383
+ #5    0x00007fff53c39294 in __85-[NSDocument(NSDocumentSaving) _saveToURL:ofType:forSaveOperation:completionHandler:]_block_invoke_2.1146 ()
+ #6    0x0000000100887c3d in _dispatch_call_block_and_release ()
+ #7    0x000000010087fd1f in _dispatch_client_callout ()
+ #8    0x000000010088dba8 in _dispatch_queue_override_invoke ()
+ #9    0x0000000100881b76 in _dispatch_root_queue_drain ()
+ #10    0x000000010088184f in _dispatch_worker_thread3 ()
+ #11    0x00000001008fc1c2 in _pthread_wqthread ()
+ #12    0x00000001008fbc45 in start_wqthread ()
+ Enqueued from com.apple.main-thread (Thread 1) Queue : com.apple.main-thread (serial)
+ #0    0x0000000100896669 in _dispatch_root_queue_push_override ()
+ #1    0x00007fff53c3916f in __85-[NSDocument(NSDocumentSaving) _saveToURL:ofType:forSaveOperation:completionHandler:]_block_invoke.1143 ()
+ #2    0x00007fff535b2918 in __68-[NSDocument _errorForOverwrittenFileWithSandboxExtension:andSaver:]_block_invoke_2.1097 ()
+ #3    0x00007fff57de36c1 in __110-[NSFileCoordinator(NSPrivate) _coordinateReadingItemAtURL:options:writingItemAtURL:options:error:byAccessor:]_block_invoke.448 ()
+ #4    0x00007fff57de2657 in -[NSFileCoordinator(NSPrivate) _withAccessArbiter:invokeAccessor:orDont:andRelinquishAccessClaim:] ()
+ #5    0x00007fff57de32cb in -[NSFileCoordinator(NSPrivate) _coordinateReadingItemAtURL:options:writingItemAtURL:options:error:byAccessor:] ()
+ #6    0x00007fff53c34954 in -[NSDocument(NSDocumentSaving) _fileCoordinator:coordinateReadingContentsAndWritingItemAtURL:byAccessor:] ()
+ #7    0x00007fff53c34b62 in -[NSDocument(NSDocumentSaving) _coordinateReadingContentsAndWritingItemAtURL:byAccessor:] ()
+ #8    0x00007fff535b2860 in __68-[NSDocument _errorForOverwrittenFileWithSandboxExtension:andSaver:]_block_invoke.1096 ()
+ #9    0x00007fff53674eb4 in -[NSDocument(NSDocumentSerializationAPIs) continueFileAccessUsingBlock:] ()
+ #10    0x00007fff5367688a in __62-[NSDocument(NSDocumentSerializationAPIs) _performFileAccess:]_block_invoke.354 ()
+ #11    0x00007fff535f38c0 in __62-[NSDocumentController(NSInternal) _onMainThreadInvokeWorker:]_block_invoke.2153 ()
+ #12    0x00007fff55acc58c in __CFRUNLOOP_IS_CALLING_OUT_TO_A_BLOCK__ ()
+ #13    0x00007fff55aaf043 in __CFRunLoopDoBlocks ()
+ #14    0x00007fff55aae6ce in __CFRunLoopRun ()
+ #15    0x00007fff55aadf43 in CFRunLoopRunSpecific ()
+ #16    0x00007fff54dc5e26 in RunCurrentEventLoopInMode ()
+ #17    0x00007fff54dc5b96 in ReceiveNextEventCommon ()
+ #18    0x00007fff54dc5914 in _BlockUntilNextEventMatchingListInModeWithFilter ()
+ #19    0x00007fff53090f5f in _DPSNextEvent ()
+ #20    0x00007fff53826b4c in -[NSApplication(NSEvent) _nextEventMatchingEventMask:untilDate:inMode:dequeue:] ()
+ #21    0x00007fff53085d6d in -[NSApplication run] ()
+ #22    0x00007fff53054f1a in NSApplicationMain ()
+ #23    0x00000001000014bc in main at /Users/jk/Documents/Programming/Projects/BkmkMgrs/Bkmx-Main.m:83
+ #24    0x00007fff7d3c1115 in start ()
+*/
