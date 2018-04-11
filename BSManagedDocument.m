@@ -1119,10 +1119,16 @@ originalContentsURL:(NSURL *)originalContentsURL
     
     void (^completionHandler)(BOOL) = ^(BOOL shouldClose) {
         if (delegate) {
-            /* If the following line won't compile, in your Build Settings
-             set "Enable strict checking of objc_msgSend Calls" to "No".  See
-             https://stackoverflow.com/questions/24922913/too-many-arguments-to-function-call-expected-0-have-3 */
-            objc_msgSend(delegate, shouldCloseSelector, self, shouldClose, contextInfo);
+            /* Calls to objc_msgSend()  won't compile, by default, or projects
+             "upgraded" by Xcode 8-9, due to fact that Build Setting
+             "Enable strict checking of objc_msgSend Calls" is now ON.  See
+             https://stackoverflow.com/questions/24922913/too-many-arguments-to-function-call-expected-0-have-3
+             The result is, oddly, a Semantic Issue:
+             "Too many arguments to function call, expected 0, have 5"
+             I chose the answer by Sahil Kapoor, which allows me to leave
+             the Build Setting ON and not fight with future Xcode updates. */
+            id (*typed_msgSend)(id, SEL, id, BOOL, void*) = (void *)objc_msgSend;
+            typed_msgSend(delegate, shouldCloseSelector, self, shouldClose, contextInfo);
         }
     };
     
