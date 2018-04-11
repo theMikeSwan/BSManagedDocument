@@ -746,7 +746,7 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
 {
     BOOL result = NO ;
     BOOL done = NO ;
-    
+
     // It's possible subclassers support more file types than the Core Data package-based one
     // BSManagedDocument supplies. e.g. an alternative format for exporting, say. If so, they don't
     // want our custom logic kicking in when writing it, so test for that as best we can.
@@ -1133,7 +1133,7 @@ originalContentsURL:(NSURL *)originalContentsURL
     };
     
     /*
-     There is a bug near here:
+     There may be a bug near here, or it may be in Veris 7:
      Click in menu: File > New Subject.
      Click the red 'Close' button.
      Next line will deadlock.
