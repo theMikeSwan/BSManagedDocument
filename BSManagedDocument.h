@@ -21,7 +21,7 @@
 //
 //  *   Saves to a file package
 //
-//  *   On 10.7+, asynchronous saving is supported. We set up a parent/child pair of contexts; the parent saves on its own thread
+//  *   Asynchronous saving. We set up a parent/child pair of contexts; the parent saves on its own thread
 //
 //  *   Full support for concurrent document opening too
 //
@@ -35,7 +35,8 @@
 //
 //  *   If multiple validation errors occur during saving, the presented error is adjusted to make debugging a little easier
 //
-//  *   And of course, full support for Autosave-In-Place and Versions
+//  *   Full support for Autosave-In-Place and Versions. Both of these are turned OFF by default,
+//      the same as NSDocument. Your subclass should turn them on if desired.
 //
 //  NOTE: Prior to OS X 10.9, there was a major flaw in Core Data's handling of Externally Stored
 //  Data Attributes. The subsystem that handles with them was unable to deal with the persistent
@@ -267,7 +268,7 @@
  */
 - (BOOL)writeBackupToURL:(NSURL *)backupURL error:(NSError **)outError;
 
-/* BSManagedDocument supports asynchronous saving on 10.7+ (on earlier releases this method returns NO).
+/** BSManagedDocument opts into async saves by default.
  */
 - (BOOL)canAsynchronouslyWriteToURL:(NSURL *)url ofType:(NSString *)typeName forSaveOperation:(NSSaveOperationType)saveOperation;
 

@@ -48,31 +48,8 @@
 {
     if (!_managedObjectContext)
     {
-        // Need 10.7+ to support concurrency types
-        __block NSManagedObjectContext *context;
-        if ([NSManagedObjectContext instancesRespondToSelector:@selector(initWithConcurrencyType:)])
-        {
-            context = [[self.class.managedObjectContextClass alloc] initWithConcurrencyType:NSMainQueueConcurrencyType];
-        }
-        else
-        {
-            // On 10.6, context MUST be created on the thread/queue that's going to use it
-            if ([NSThread isMainThread])
-            {
-                context = [[self.class.managedObjectContextClass alloc] init];
-            }
-            else
-            {
-                dispatch_sync(dispatch_get_main_queue(), ^{
-                    context = [[self.class.managedObjectContextClass alloc] init];
-                });
-            }
-        }
-        
+        NSManagedObjectContext *context = [[self.class.managedObjectContextClass alloc] initWithConcurrencyType:NSMainQueueConcurrencyType];
         [self setManagedObjectContext:context];
-#if ! __has_feature(objc_arc)
-        [context release];
-#endif
     }
     
     return _managedObjectContext;
@@ -84,35 +61,13 @@
 
     NSPersistentStoreCoordinator *coordinator = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:[self managedObjectModel]];
     
-    // Need 10.7+ to support parent context
-    if ([context respondsToSelector:@selector(setParentContext:)])
-    {
-        NSManagedObjectContext *parentContext = [[self.class.managedObjectContextClass alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
-        parentContext.undoManager = nil; // no point in it supporting undo
-        parentContext.persistentStoreCoordinator = coordinator;
-        
-        [context setParentContext:parentContext];
-
-#if !__has_feature(objc_arc)
-        [parentContext release];
-#endif
-    }
-    else
-    {
-        [context setPersistentStoreCoordinator:coordinator];
-    }
-
-#if __has_feature(objc_arc)
-    _managedObjectContext = context;
-#else
-    [context retain];
-    [_managedObjectContext release]; _managedObjectContext = context;
-#endif
+    NSManagedObjectContext *parentContext = [[self.class.managedObjectContextClass alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
+    parentContext.undoManager = nil; // no point in it supporting undo
+    parentContext.persistentStoreCoordinator = coordinator;
     
+    [context setParentContext:parentContext];
 
-#if !__has_feature(objc_arc)
-    [coordinator release];  // context hangs onto it for us
-#endif
+    _managedObjectContext = context;
     
     [super setUndoManager:[context undoManager]]; // has to be super as we implement -setUndoManager: to be a no-op
 }
@@ -125,10 +80,6 @@
     if (!_managedObjectModel)
     {
         _managedObjectModel = [NSManagedObjectModel mergedModelFromBundles:[NSArray arrayWithObject:[NSBundle mainBundle]]];
-
-#if ! __has_feature(objc_arc)
-        [_managedObjectModel retain];
-#endif
     }
 
     return _managedObjectModel;
@@ -147,30 +98,15 @@
     // on the assumption it's posted on the main thread. That could do some very weird things, so
     // let's make sure the notification is actually posted on the main thread.
     // Also seems to fix the deadlock in https://github.com/karelia/BSManagedDocument/issues/36
-    if ([context respondsToSelector:@selector(performBlockAndWait:)]) {
-		[context performBlockAndWait:^{
-			NSPersistentStoreCoordinator *storeCoordinator = context.persistentStoreCoordinator;
-
-			_store = [storeCoordinator addPersistentStoreWithType:[self persistentStoreTypeForFileType:fileType]
-													configuration:configuration
-															  URL:storeURL
-														  options:storeOptions
-															error:error];
-		}];
-	}
-	else {
-		NSPersistentStoreCoordinator *storeCoordinator = context.persistentStoreCoordinator;
-
-		_store = [storeCoordinator addPersistentStoreWithType:[self persistentStoreTypeForFileType:fileType]
-												configuration:configuration
-														  URL:storeURL
-													  options:storeOptions
-														error:error];
-	}
-
-#if ! __has_feature(objc_arc)
-	[_store retain];
-#endif
+    [context performBlockAndWait:^{
+        NSPersistentStoreCoordinator *storeCoordinator = context.persistentStoreCoordinator;
+        
+        _store = [storeCoordinator addPersistentStoreWithType:[self persistentStoreTypeForFileType:fileType]
+                                                configuration:configuration
+                                                          URL:storeURL
+                                                      options:storeOptions
+                                                        error:error];
+    }];
 
 	return (_store != nil);
 }
@@ -180,7 +116,7 @@
                                             error:(NSError **)error
 {
     // On 10.8+, the coordinator whinges but doesn't fail if you leave out NSReadOnlyPersistentStoreOption and the file turns out to be read-only. Supplying a value makes it fail with a (not very helpful) error when the store is read-only
-    BOOL readonly = ([self respondsToSelector:@selector(isInViewingMode)] && [self isInViewingMode]);
+    BOOL readonly = [self isInViewingMode];
     
     NSDictionary *options = @{
                               // For apps linked against 10.9+ and supporting 10.6 still, use the old
@@ -231,20 +167,6 @@
     [self deleteAutosavedContentsTempDirectory];
 }
 
-// It's simpler to wrap the whole method in a conditional test rather than using a macro for each line.
-#if ! __has_feature(objc_arc)
-- (void)dealloc;
-{
-    [_managedObjectContext release];
-    [_managedObjectModel release];
-    [_store release];
-    
-    // _additionalContent is unretained so shouldn't be released here
-    
-    [super dealloc];
-}
-#endif
-
 #pragma mark Reading Document Data
 
 - (BOOL)readFromURL:(NSURL *)absoluteURL ofType:(NSString *)typeName error:(NSError **)outError
@@ -266,8 +188,7 @@
         // I've found for atomic stores that -reset only rolls back to the last loaded or saved version of the store; NOT what's actually on disk
         // To force it to re-read from disk, the only solution I've found is removing and re-adding the persistent store
         NSManagedObjectContext *context = self.managedObjectContext;
-        if ([context respondsToSelector:@selector(parentContext)])
-        {
+        
             // In my testing, HAVE to do the removal using parent's private queue. Otherwise, it deadlocks, trying to acquire a _PFLock
             NSManagedObjectContext *parent = context.parentContext;
             while (parent)
@@ -279,18 +200,6 @@
             [context performBlockAndWait:^{
                 result = [context.persistentStoreCoordinator removePersistentStore:_store error:outError];
             }];
-        }
-        else
-        {
-            if (![context.persistentStoreCoordinator removePersistentStore:_store error:outError])
-            {
-                return NO;
-            }
-        }
-
-#if !__has_feature(objc_arc)
-        [_store release];
-#endif
 
         _store = nil;
     }
@@ -340,12 +249,9 @@
     }
     
     
-    // On 10.7+, save the main context, ready for parent to be saved in a moment
+    // Save the main context, ready for parent to be saved in a moment
     NSManagedObjectContext *context = self.managedObjectContext;
-    if ([context respondsToSelector:@selector(parentContext)])
-    {
-        if (![context save:outError]) return nil;
-    }
+    if (![context save:outError]) return nil;
     
     
     // What we consider to be "contents" is actually a worker block
@@ -402,11 +308,6 @@
              error:error];
              
              if (!migrated) return NO;
-             
-             #if ! __has_feature(objc_arc)
-             [migrated retain];
-             [_store release];
-             #endif
              
              _store = migrated;
              }
@@ -529,11 +430,7 @@
         return result;
     };
     
-#if !__has_feature(objc_arc)
-    return [[contents copy] autorelease];
-#else
     return [contents copy];
-#endif
 }
 
 - (BOOL)createPackageDirectoriesAtURL:(NSURL *)url
@@ -599,10 +496,6 @@
             return;
         }
         
-#if !__has_feature(objc_arc)
-        [_contents retain];
-#endif
-        
         
         // Kick off async saving work
         [super saveToURL:url ofType:typeName forSaveOperation:saveOperation completionHandler:^(NSError *error) {
@@ -621,9 +514,6 @@
             {
                 [self performActivityWithSynchronousWaiting:NO usingBlock:^(void (^activityCompletionHandler)(void)) {
                     
-#if !__has_feature(objc_arc)
-                    [_contents release];
-#endif
                     _contents = nil;
                     
                     activityCompletionHandler();
@@ -631,9 +521,6 @@
             }
             else
             {
-#if !__has_feature(objc_arc)
-                [_contents release];
-#endif
                 _contents = nil;
             }
 			
@@ -653,19 +540,6 @@
     }];
 }
 
-- (BOOL)saveToURL:(NSURL *)url ofType:(NSString *)typeName forSaveOperation:(NSSaveOperationType)saveOperation error:(NSError **)outError;
-{
-    BOOL result = [super saveToURL:url ofType:typeName forSaveOperation:saveOperation error:outError];
-    
-    if (result &&
-        (saveOperation == NSSaveOperation || saveOperation == NSAutosaveInPlaceOperation || saveOperation == NSSaveAsOperation))
-    {
-        [self deleteAutosavedContentsTempDirectory];
-    }
-    
-    return result;
-}
-
 /*	Regular Save operations can write directly to the existing document since Core Data provides atomicity for us
  */
 - (BOOL)writeSafelyToURL:(NSURL *)absoluteURL
@@ -680,7 +554,7 @@
 	if ([NSWorkspace.sharedWorkspace type:self.fileType conformsToType:typeName]) {
         
 		// At this point, we've either captured all document content, or are writing on the main thread, so it's fine to unblock the UI
-		if ([self respondsToSelector:@selector(unblockUserInteraction)]) [self unblockUserInteraction];
+		[self unblockUserInteraction];
 		
 		
         if (saveOperation == NSSaveOperation || saveOperation == NSAutosaveInPlaceOperation ||
@@ -689,8 +563,8 @@
             NSURL *backupURL = nil;
             
 			// As of 10.8, need to make a backup of the document when saving in-place
-			// Unfortunately, it turns out 10.7 includes -backupFileURL, just that it's private. Checking AppKit number seems to be our best bet, and I have to hardcode that since 10_8 is not defined in the SDK yet. (1187 was found simply by looking at the GM)
-			if (NSAppKitVersionNumber >= 1187 &&
+			// Unfortunately, it turns out 10.7 includes -backupFileURL, just that it's private. Checking AppKit number seems to be our best bet
+			if (NSAppKitVersionNumber >= NSAppKitVersionNumber10_8 &&
 				[self respondsToSelector:@selector(backupFileURL)] &&
 				(saveOperation == NSSaveOperation || saveOperation == NSAutosaveInPlaceOperation) &&
 				[[self class] preservesVersions])			// otherwise backupURL has a different meaning
@@ -837,32 +711,13 @@ originalContentsURL:(NSURL *)originalContentsURL
     // On 10.6 saving is just one call, all on main thread. 10.7+ have to work on the context's private queue
     NSManagedObjectContext *context = [self managedObjectContext];
     
-    if ([context respondsToSelector:@selector(parentContext)])
-    {
         [self unblockUserInteraction];
         
         NSManagedObjectContext *parent = [context parentContext];
         
         [parent performBlockAndWait:^{
             result = [self preflightURL:storeURL thenSaveContext:parent error:error];
-            
-#if ! __has_feature(objc_arc)
-            // Errors need special handling to guarantee surviving crossing the block. http://www.mikeabdullah.net/cross-thread-error-passing.html
-            if (!result && error) [*error retain];
-#endif
-            
         }];
-        
-#if ! __has_feature(objc_arc)
-        if (!result && error) [*error autorelease]; // tidy up since any error was retained on worker thread
-#endif
-        
-    }
-    else
-    {
-        result = [self preflightURL:storeURL thenSaveContext:context error:error];
-    }
-    
     
     return result;
 }
@@ -898,9 +753,8 @@ originalContentsURL:(NSURL *)originalContentsURL
 
 - (BOOL)isEntireFileLoaded { return NO; }
 
-- (BOOL)canAsynchronouslyWriteToURL:(NSURL *)url ofType:(NSString *)typeName forSaveOperation:(NSSaveOperationType)saveOperation;
-{
-    return [NSDocument instancesRespondToSelector:_cmd];    // opt in on 10.7+
+- (BOOL)canAsynchronouslyWriteToURL:(NSURL *)url ofType:(NSString *)typeName forSaveOperation:(NSSaveOperationType)saveOperation {
+    return YES;
 }
 
 - (void)setFileURL:(NSURL *)absoluteURL
@@ -929,11 +783,6 @@ originalContentsURL:(NSURL *)originalContentsURL
 }
 
 #pragma mark Autosave
-
-/*  Enable autosave-in-place and versions browser on 10.7+
- */
-+ (BOOL)autosavesInPlace { return [NSDocument respondsToSelector:_cmd]; }
-+ (BOOL)preservesVersions { return [self autosavesInPlace]; }
 
 - (void)setAutosavedContentsFileURL:(NSURL *)absoluteURL;
 {
@@ -966,9 +815,6 @@ originalContentsURL:(NSURL *)originalContentsURL
     NSURL *autosaveTempDir = self.autosavedContentsTempDirectoryURL;
     if (autosaveTempDir)
     {
-#if ! __has_feature(objc_arc)
-        [[autosaveTempDir retain] autorelease];
-#endif
         self.autosavedContentsTempDirectoryURL = nil;
         
         NSError *error;
@@ -992,9 +838,6 @@ originalContentsURL:(NSURL *)originalContentsURL
         [self removeWindowController:aController];
         [aController close];
     }
-#if ! __has_feature(objc_arc)
-    [controllers release];
-#endif
     }
 
 
@@ -1027,7 +870,9 @@ originalContentsURL:(NSURL *)originalContentsURL
     
     void (^completionHandler)(BOOL) = ^(BOOL shouldClose) {
         if (delegate) {
-            objc_msgSend(delegate, shouldCloseSelector, self, shouldClose, contextInfo);
+            typedef void (*callback_type)(id, SEL, id, BOOL, void*);
+            callback_type callback = (callback_type)objc_msgSend;
+            callback(delegate, shouldCloseSelector, self, shouldClose, contextInfo);
         }
     };
     
@@ -1091,10 +936,6 @@ originalContentsURL:(NSURL *)originalContentsURL
     
     // Somewhat of a hack: wait for autosave to finish
     [self performSynchronousFileAccessUsingBlock:^{ }];
-    
-#if ! __has_feature(objc_arc)
-    if (!result) [*outError autorelease];   // match the -copy above
-#endif
     
     return result;
 }
