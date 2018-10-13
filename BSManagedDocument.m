@@ -582,7 +582,9 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
                     
                     _contents = nil;
                     
-                    activityCompletionHandler();
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        activityCompletionHandler();
+                    });
                 }];
             }
             else
@@ -600,8 +602,10 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
             
 			
 			// And can finally declare we're done
-            fileAccessCompletionHandler();
-            if (completionHandler) completionHandler(error);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                fileAccessCompletionHandler();
+                if (completionHandler) completionHandler(error);
+            });
         }];
     }];
 }
