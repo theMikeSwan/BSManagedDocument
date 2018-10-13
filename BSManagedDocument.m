@@ -90,6 +90,10 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
     if (!_managedObjectContext)
     {
         NSManagedObjectContext *context = [[self.class.managedObjectContextClass alloc] initWithConcurrencyType:NSMainQueueConcurrencyType];
+        if(context.undoManager == nil) {
+            context.undoManager = [[NSUndoManager alloc] init];
+        }
+        
         [self setManagedObjectContext:context];
     }
     
