@@ -115,10 +115,6 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
     _managedObjectContext = context;
     
     [super setUndoManager:[context undoManager]]; // has to be super as we implement -setUndoManager: to be a no-op
-#if !__has_feature(objc_arc)
-    [coordinator release];  // context hangs onto it for us
-#endif
-
     // See note JK20170624 at end of file
 }
 
@@ -168,9 +164,6 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
                                                               URL:storeURL
                                                           options:storeOptions
                                                             error:&error];
-#if ! __has_feature(objc_arc)
-            [error retain];
-#endif
         }];
     }
     else {
@@ -181,15 +174,7 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
                                                           URL:storeURL
                                                       options:storeOptions
                                                         error:&error];
-#if ! __has_feature(objc_arc)
-        [error retain];
-#endif
     }
-
-#if ! __has_feature(objc_arc)
-	[_store retain];
-    [error autorelease];
-#endif
     
     if (error && error_p)
     {
@@ -254,21 +239,6 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
     [super close];
     [self deleteAutosavedContentsTempDirectory];
 }
-
-// It's simpler to wrap the whole method in a conditional test rather than using a macro for each line.
-#if ! __has_feature(objc_arc)
-- (void)dealloc;
-{
-    [_managedObjectContext release];
-    [_managedObjectModel release];
-    [_store release];
-    [_autosavedContentsTempDirectoryURL release];
-    
-    // _additionalContent is unretained so shouldn't be released here
-    
-    [super dealloc];
-}
-#endif
 
 #pragma mark Reading Document Data
 
@@ -735,10 +705,6 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
         [[NSNotificationCenter defaultCenter] performSelectorOnMainThread:@selector(postNotification:)
                                                                withObject:note
                                                             waitUntilDone:NO] ;
-#if ! __has_feature(objc_arc)
-        [note release];
-#endif
-                                                            
     }
     
     return result ;
@@ -785,30 +751,11 @@ originalContentsURL:(NSURL *)originalContentsURL
 
 - (void)setBundleBitForDirectoryAtURL:(NSURL *)url;
 {
-#if (defined MAC_OS_X_VERSION_10_8) && MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_8   // have to check as NSURLIsPackageKey only became writable in 10.8
     NSError *error;
     if (![url setResourceValue:@YES forKey:NSURLIsPackageKey error:&error])
     {
         NSLog(@"Error marking document as a package: %@", error);
     }
-#else
-    FSRef fileRef;
-    if (CFURLGetFSRef((CFURLRef)url, &fileRef))
-    {
-        FSCatalogInfo fileInfo;
-        OSErr error = FSGetCatalogInfo(&fileRef, kFSCatInfoFinderInfo, &fileInfo, NULL, NULL, NULL);
-        
-        if (!error)
-        {
-            FolderInfo *finderInfo = (FolderInfo *)fileInfo.finderInfo;
-            finderInfo->finderFlags |= kHasBundle;
-            
-            error = FSSetCatalogInfo(&fileRef, kFSCatInfoFinderInfo, &fileInfo);
-        }
-        
-        if (error) NSLog(@"OSError %i setting bundle bit for %@", error, [url path]);
-    }
-#endif
 }
 
 - (BOOL)writeStoreContentToURL:(NSURL *)storeURL error:(NSError **)error;
