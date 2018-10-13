@@ -22,6 +22,7 @@
 
 #import <objc/message.h>
 
+NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotification" ;
 
 @interface BSManagedDocument ()
 @property(nonatomic, copy) NSURL *autosavedContentsTempDirectoryURL;
@@ -34,6 +35,46 @@
 
 + (NSString *)storeContentName; { return @"StoreContent"; }
 + (NSString *)persistentStoreName; { return @"persistentStore"; }
+
++ (NSString *)storePathForDocumentPath:(NSString*)path
+{
+    BOOL isDirectory = YES;
+    [[NSFileManager defaultManager] fileExistsAtPath:path
+                                         isDirectory:&isDirectory];
+    /* I added the initialization YES on 20180114 after seeing a runtime
+     warning here, sayig that isDirectory had a "Load of value -96,
+     which is not a valid value for type 'BOOL' (aka 'signed char')". */
+    if (isDirectory)
+    {
+        /* path is a file package. */
+        path = [path stringByAppendingPathComponent:[BSManagedDocument storeContentName]];
+        path = [path stringByAppendingPathComponent:[BSManagedDocument persistentStoreName]];
+    }
+
+    return path;
+}
+
++ (NSString *)documentPathForStorePath:(NSString*)path
+                     documentExtension:(NSString*)extension
+{
+    NSString* answer = nil;
+    if ([[path pathExtension] isEqualToString:extension])
+    {
+        answer = path;
+    }
+    else if ([[path lastPathComponent] isEqualToString:[self persistentStoreName]]) {
+        path = [path stringByDeletingLastPathComponent];
+        if ([[path lastPathComponent] isEqualToString:[self storeContentName]]) {
+            path = [path stringByDeletingLastPathComponent];
+            if ([[path pathExtension] isEqualToString:extension]) {
+                answer = path;
+            }
+        }
+    }
+
+    return answer;
+}
+
 
 + (NSURL *)persistentStoreURLForDocumentURL:(NSURL *)fileURL;
 {
@@ -70,6 +111,11 @@
     _managedObjectContext = context;
     
     [super setUndoManager:[context undoManager]]; // has to be super as we implement -setUndoManager: to be a no-op
+#if !__has_feature(objc_arc)
+    [coordinator release];  // context hangs onto it for us
+#endif
+
+    // See note JK20170624 at end of file
 }
 
 // Having this method is a bit of a hack for Sandvox's benefit. I intend to remove it in favour of something neater
@@ -89,26 +135,64 @@
                                            ofType:(NSString *)fileType
                                modelConfiguration:(NSString *)configuration
                                      storeOptions:(NSDictionary *)storeOptions
-                                            error:(NSError **)error
+                                            error:(NSError **)error_p
 {
-	NSManagedObjectContext *context = self.managedObjectContext;
+    /* I was getting a crash on launch, in OS X 10.11, when previously-opened
+     document was attempted to be reopened (for "state restoration") by
+     -[NSDocumentController reopenDocumentForURL:withContentsOfURL:display:completionHandler:],
+     if said document could not be migrated because it was of an unsupported
+     previous data model version.  (Yes, this is an edge edge case).
+     This happened in two different projects of mine, one ARC, one non-ARC.
+     The crashing seemed to be fixed after I introduced the following local
+     'error' variable to isolate it from the out NSError**.
+     Jerry Krinock 2016-Mar-14. */
+    NSError* __block error = nil ;
+    NSManagedObjectContext *context = self.managedObjectContext;
 
     // Adding a persistent store will post a notification. If your app already has an
     // NSObjectController (or subclass) setup to the context, it will react to that notification,
     // on the assumption it's posted on the main thread. That could do some very weird things, so
     // let's make sure the notification is actually posted on the main thread.
     // Also seems to fix the deadlock in https://github.com/karelia/BSManagedDocument/issues/36
-    [context performBlockAndWait:^{
+    if ([context respondsToSelector:@selector(performBlockAndWait:)])
+    {
+        [context performBlockAndWait:^{
+            NSPersistentStoreCoordinator *storeCoordinator = context.persistentStoreCoordinator;
+
+            _store = [storeCoordinator addPersistentStoreWithType:[self persistentStoreTypeForFileType:fileType]
+                                                    configuration:configuration
+                                                              URL:storeURL
+                                                          options:storeOptions
+                                                            error:&error];
+#if ! __has_feature(objc_arc)
+            [error retain];
+#endif
+        }];
+    }
+    else {
         NSPersistentStoreCoordinator *storeCoordinator = context.persistentStoreCoordinator;
-        
+
         _store = [storeCoordinator addPersistentStoreWithType:[self persistentStoreTypeForFileType:fileType]
                                                 configuration:configuration
                                                           URL:storeURL
                                                       options:storeOptions
-                                                        error:error];
-    }];
+                                                        error:&error];
+#if ! __has_feature(objc_arc)
+        [error retain];
+#endif
+    }
 
-	return (_store != nil);
+#if ! __has_feature(objc_arc)
+	[_store retain];
+    [error autorelease];
+#endif
+    
+    if (error && error_p)
+    {
+        *error_p = error;
+    }
+
+    return (_store != nil);
 }
 
 - (BOOL)configurePersistentStoreCoordinatorForURL:(NSURL *)storeURL
@@ -166,6 +250,21 @@
     [super close];
     [self deleteAutosavedContentsTempDirectory];
 }
+
+// It's simpler to wrap the whole method in a conditional test rather than using a macro for each line.
+#if ! __has_feature(objc_arc)
+- (void)dealloc;
+{
+    [_managedObjectContext release];
+    [_managedObjectModel release];
+    [_store release];
+    [_autosavedContentsTempDirectoryURL release];
+    
+    // _additionalContent is unretained so shouldn't be released here
+    
+    [super dealloc];
+}
+#endif
 
 #pragma mark Reading Document Data
 
@@ -237,7 +336,8 @@
 
 - (id)contentsForURL:(NSURL *)url ofType:(NSString *)typeName saveOperation:(NSSaveOperationType)saveOperation error:(NSError **)outError;
 {
-    NSAssert([NSThread isMainThread], @"Somehow -%@ has been called off of the main thread (operation %u to: %@)", NSStringFromSelector(_cmd), (unsigned)saveOperation, [url path]);
+    // NSAssert([NSThread isMainThread], @"Somehow -%@ has been called off of the main thread (operation %u to: %@)", NSStringFromSelector(_cmd), (unsigned)saveOperation, [url path]);
+    // See Note JK20180125 below.
     
     // Grab additional content that a subclass might provide
     if (outError) *outError = nil;  // unusually for me, be forgiving of subclasses which forget to fill in the error
@@ -485,7 +585,7 @@
         
         
         // Stash contents temporarily into an ivar so -writeToURL:… can access it from the worker thread
-        NSError *error;
+        NSError *error = nil ;
         _contents = [self contentsForURL:url ofType:typeName saveOperation:saveOperation error:&error];
         
         if (!_contents)
@@ -540,6 +640,25 @@
     }];
 }
 
+
+#if MAC_OS_X_VERSION_MAX_ALLOWED < 101300
+/* Documentation says that this method was deprecated in macOS 10.7, but I did
+ not get any compiler warnings until compiling with 10.13 SDK.  Oh, well; the
+ above #if is to avoid the warning. */
+- (BOOL)saveToURL:(NSURL *)url ofType:(NSString *)typeName forSaveOperation:(NSSaveOperationType)saveOperation error:(NSError **)outError;
+{
+    BOOL result = [super saveToURL:url ofType:typeName forSaveOperation:saveOperation error:outError];
+    
+    if (result &&
+        (saveOperation == NSSaveOperation || saveOperation == NSAutosaveInPlaceOperation || saveOperation == NSSaveAsOperation))
+    {
+        [self deleteAutosavedContentsTempDirectory];
+    }
+    
+    return result;
+}
+#endif
+
 /*	Regular Save operations can write directly to the existing document since Core Data provides atomicity for us
  */
 - (BOOL)writeSafelyToURL:(NSURL *)absoluteURL
@@ -547,6 +666,9 @@
 		forSaveOperation:(NSSaveOperationType)saveOperation
 				   error:(NSError **)outError
 {
+    BOOL result = NO ;
+    BOOL done = NO ;
+
     // It's possible subclassers support more file types than the Core Data package-based one
     // BSManagedDocument supplies. e.g. an alternative format for exporting, say. If so, they don't
     // want our custom logic kicking in when writing it, so test for that as best we can.
@@ -589,11 +711,11 @@
 			
             // NSDocument attempts to write a copy of the document out at a temporary location.
             // Core Data cannot support this, so we override it to save directly.
-            BOOL result = [self writeToURL:absoluteURL
-                                    ofType:typeName
-                          forSaveOperation:saveOperation
-                       originalContentsURL:[self fileURL]
-                                     error:outError];
+            result = [self writeToURL:absoluteURL
+                               ofType:typeName
+                     forSaveOperation:saveOperation
+                  originalContentsURL:[self fileURL]
+                                error:outError];
             
             
             if (!result)
@@ -624,20 +746,38 @@
                 }
             }
             
-            return result;
+            done = YES;
         }
     }
     
-    // Other situations are basically fine to go through the regular channels
-    return [super writeSafelyToURL:absoluteURL
-                            ofType:typeName
-                  forSaveOperation:saveOperation
-                             error:outError];
+    if (!done) {
+        // Other situations are basically fine to go through the regular channels
+        result = [super writeSafelyToURL:absoluteURL
+                                  ofType:typeName
+                        forSaveOperation:saveOperation
+                                   error:outError];
+    }
+    
+    if (result) {
+        NSNotification* note = [[NSNotification alloc] initWithName:BSManagedDocumentDidSaveNotification
+                                                             object:self
+                                                           userInfo:nil] ;
+        [[NSNotificationCenter defaultCenter] performSelectorOnMainThread:@selector(postNotification:)
+                                                               withObject:note
+                                                            waitUntilDone:NO] ;
+#if ! __has_feature(objc_arc)
+        [note release];
+#endif
+                                                            
+    }
+    
+    return result ;
 }
 
 - (BOOL)writeBackupToURL:(NSURL *)backupURL error:(NSError **)outError;
 {
     NSURL *source = self.mostRecentlySavedFileURL;
+    /* The following also copies any additional content in the package. */
 	return [[NSFileManager defaultManager] copyItemAtURL:source toURL:backupURL error:outError];
 }
 
@@ -870,12 +1010,34 @@ originalContentsURL:(NSURL *)originalContentsURL
     
     void (^completionHandler)(BOOL) = ^(BOOL shouldClose) {
         if (delegate) {
-            typedef void (*callback_type)(id, SEL, id, BOOL, void*);
-            callback_type callback = (callback_type)objc_msgSend;
-            callback(delegate, shouldCloseSelector, self, shouldClose, contextInfo);
+//<<<<<<< HEAD
+//            typedef void (*callback_type)(id, SEL, id, BOOL, void*);
+//            callback_type callback = (callback_type)objc_msgSend;
+//            callback(delegate, shouldCloseSelector, self, shouldClose, contextInfo);
+//=======
+            /* Calls to objc_msgSend()  won't compile, by default, or projects
+             "upgraded" by Xcode 8-9, due to fact that Build Setting
+             "Enable strict checking of objc_msgSend Calls" is now ON.  See
+             https://stackoverflow.com/questions/24922913/too-many-arguments-to-function-call-expected-0-have-3
+             The result is, oddly, a Semantic Issue:
+             "Too many arguments to function call, expected 0, have 5"
+             I chose the answer by Sahil Kapoor, which allows me to leave
+             the Build Setting ON and not fight with future Xcode updates. */
+            id (*typed_msgSend)(id, SEL, id, BOOL, void*) = (void *)objc_msgSend;
+            typed_msgSend(delegate, shouldCloseSelector, self, shouldClose, contextInfo);
+//>>>>>>> jer
         }
     };
     
+    /*
+     There may be a bug near here, or it may be in Veris 7:
+     Click in menu: File > New Subject.
+     Click the red 'Close' button.
+     Next line will deadlock.
+     Sending [self setChangeCount:NSChangeCleared] before that line does not help.
+     To get rid of such a document (which will reappear on any subsequent launch
+     due to state restoration), send here [self close].
+     */
     [super canCloseDocumentWithDelegate:self
                     shouldCloseSelector:@selector(document:didDecideToClose:contextInfo:)
                             contextInfo:Block_copy((__bridge void *)completionHandler)];
@@ -940,14 +1102,7 @@ originalContentsURL:(NSURL *)originalContentsURL
     return result;
 }
 
-#pragma mark Undo
-
-// No-ops, like NSPersistentDocument
-- (void)setUndoManager:(NSUndoManager *)undoManager { }
-- (void)setHasUndoManager:(BOOL)hasUndoManager { }
-
-// Could also implement -hasUndoManager. The NSPersistentDocument docs just say "Returns YES", which you could construe to mean it's overriden there. But I think what it actually means is that the default value for documents is YES, and we've overridden -setHasUndoManager: to be a no-op, so there's no reasonable way for it to return NO
-// Update: Some poking around tells me that NSPersistentDocument does in fact override -hasUndoManager. But what that implementation does, who knows! Perhaps it handles the edge case of the MOC having no undo manager
+// See note JK20170624 at end of file
 
 #pragma mark Error Presentation
 
@@ -1005,4 +1160,78 @@ originalContentsURL:(NSURL *)originalContentsURL
 
 @end
 
+/* Note JK20170624
 
+ I removed code in two places which purportedly sets the document's undo
+ manager as NSPersistentDocument does.  The code I removed creates a managed
+ object context, which initially has nil undo manager, then later copies its
+ nil undo manager to the document.  Result: document has nil undo manager.
+ Furthermore, it overrides the document's -setUndoManager: to be a noop,
+ making it impossible to set a non-nil undo manager later.
+
+ I have not fully tested this in a demo project, although in one project
+ (Veris) it seems to give a nil undo manager, as my analysis predicts.
+ In any case, it is possibly not compatible with my requirement in another
+ project (BkmkMgrs) of using Graham Cox' GCUndoManager instead of
+ NSUndoManager.
+
+ And I do not believe that the code I removed simply behaves the same as
+ NSPersistentDocument, because my BkmkMgrs app had an non-nil undo manager
+ before I simply replaced NSPersistentDocument with out-of-the-box
+ BSManagedDocument.
+
+ Jerry Krinock  2017-06-24
+ */
+
+/* Note JK20180125
+
+ I've removed the above assertion because it tripped for me when I had
+ enabled asynchronous saving, and I think it is a false alarm.  The call
+ stack was as shown below.  Indeed it was on a secondary thread, because
+ the main thread invoked
+ -[BkmxDoc writeSafelyToURL:ofType:forSaveOperation:error:], which the
+ system called on a secondary thread.  Is that not the whole idea of
+ asynchronous saving?  For macOS 10.7+, this class does return YES for
+ -canAsynchronouslyWriteToURL:::.
+
+ Thread 50 Queue : com.apple.root.default-qos (concurrent)
+ #0    0x00007fff57c3823f in -[NSAssertionHandler handleFailureInMethod:object:file:lineNumber:description:] ()
+ #1    0x00000001002b7e13 in -[BSManagedDocument contentsForURL:ofType:saveOperation:error:] at /Users/jk/Documents/Programming/Projects/BSManagedDocument/BSManagedDocument.m:396
+ #2    0x00000001002b9881 in -[BSManagedDocument writeToURL:ofType:forSaveOperation:originalContentsURL:error:] at /Users/jk/Documents/Programming/Projects/BSManagedDocument/BSManagedDocument.m:872
+ #3    0x00000001002b95da in -[BSManagedDocument writeSafelyToURL:ofType:forSaveOperation:error:] at /Users/jk/Documents/Programming/Projects/BSManagedDocument/BSManagedDocument.m:791
+ #4    0x00000001002e0d41 in -[BkmxDoc writeSafelyToURL:ofType:forSaveOperation:error:] at /Users/jk/Documents/Programming/Projects/BkmkMgrs/BkmxDoc.m:5383
+ #5    0x00007fff53c39294 in __85-[NSDocument(NSDocumentSaving) _saveToURL:ofType:forSaveOperation:completionHandler:]_block_invoke_2.1146 ()
+ #6    0x0000000100887c3d in _dispatch_call_block_and_release ()
+ #7    0x000000010087fd1f in _dispatch_client_callout ()
+ #8    0x000000010088dba8 in _dispatch_queue_override_invoke ()
+ #9    0x0000000100881b76 in _dispatch_root_queue_drain ()
+ #10    0x000000010088184f in _dispatch_worker_thread3 ()
+ #11    0x00000001008fc1c2 in _pthread_wqthread ()
+ #12    0x00000001008fbc45 in start_wqthread ()
+ Enqueued from com.apple.main-thread (Thread 1) Queue : com.apple.main-thread (serial)
+ #0    0x0000000100896669 in _dispatch_root_queue_push_override ()
+ #1    0x00007fff53c3916f in __85-[NSDocument(NSDocumentSaving) _saveToURL:ofType:forSaveOperation:completionHandler:]_block_invoke.1143 ()
+ #2    0x00007fff535b2918 in __68-[NSDocument _errorForOverwrittenFileWithSandboxExtension:andSaver:]_block_invoke_2.1097 ()
+ #3    0x00007fff57de36c1 in __110-[NSFileCoordinator(NSPrivate) _coordinateReadingItemAtURL:options:writingItemAtURL:options:error:byAccessor:]_block_invoke.448 ()
+ #4    0x00007fff57de2657 in -[NSFileCoordinator(NSPrivate) _withAccessArbiter:invokeAccessor:orDont:andRelinquishAccessClaim:] ()
+ #5    0x00007fff57de32cb in -[NSFileCoordinator(NSPrivate) _coordinateReadingItemAtURL:options:writingItemAtURL:options:error:byAccessor:] ()
+ #6    0x00007fff53c34954 in -[NSDocument(NSDocumentSaving) _fileCoordinator:coordinateReadingContentsAndWritingItemAtURL:byAccessor:] ()
+ #7    0x00007fff53c34b62 in -[NSDocument(NSDocumentSaving) _coordinateReadingContentsAndWritingItemAtURL:byAccessor:] ()
+ #8    0x00007fff535b2860 in __68-[NSDocument _errorForOverwrittenFileWithSandboxExtension:andSaver:]_block_invoke.1096 ()
+ #9    0x00007fff53674eb4 in -[NSDocument(NSDocumentSerializationAPIs) continueFileAccessUsingBlock:] ()
+ #10    0x00007fff5367688a in __62-[NSDocument(NSDocumentSerializationAPIs) _performFileAccess:]_block_invoke.354 ()
+ #11    0x00007fff535f38c0 in __62-[NSDocumentController(NSInternal) _onMainThreadInvokeWorker:]_block_invoke.2153 ()
+ #12    0x00007fff55acc58c in __CFRUNLOOP_IS_CALLING_OUT_TO_A_BLOCK__ ()
+ #13    0x00007fff55aaf043 in __CFRunLoopDoBlocks ()
+ #14    0x00007fff55aae6ce in __CFRunLoopRun ()
+ #15    0x00007fff55aadf43 in CFRunLoopRunSpecific ()
+ #16    0x00007fff54dc5e26 in RunCurrentEventLoopInMode ()
+ #17    0x00007fff54dc5b96 in ReceiveNextEventCommon ()
+ #18    0x00007fff54dc5914 in _BlockUntilNextEventMatchingListInModeWithFilter ()
+ #19    0x00007fff53090f5f in _DPSNextEvent ()
+ #20    0x00007fff53826b4c in -[NSApplication(NSEvent) _nextEventMatchingEventMask:untilDate:inMode:dequeue:] ()
+ #21    0x00007fff53085d6d in -[NSApplication run] ()
+ #22    0x00007fff53054f1a in NSApplicationMain ()
+ #23    0x00000001000014bc in main at /Users/jk/Documents/Programming/Projects/BkmkMgrs/Bkmx-Main.m:83
+ #24    0x00007fff7d3c1115 in start ()
+*/

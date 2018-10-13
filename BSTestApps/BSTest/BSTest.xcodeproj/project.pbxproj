@@ -256,6 +256,11 @@
 			attributes = {
 				LastUpgradeCheck = 0450;
 				ORGANIZATIONNAME = "Jungle Candy Software";
+				TargetAttributes = {
+					AD9362371681C0DF00B4FA9C = {
+						DevelopmentTeam = YEL2G7AHNU;
+					};
+				};
 			};
 			buildConfigurationList = AD9362321681C0DF00B4FA9C /* Build configuration list for PBXProject "BSTest" */;
 			compatibilityVersion = "Xcode 3.2";
@@ -479,9 +484,11 @@
 				CODE_SIGN_ENTITLEMENTS = BSTest/BSTest.entitlements;
 				CODE_SIGN_IDENTITY = "Mac Developer";
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = YEL2G7AHNU;
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = "BSTest/BSTest-Prefix.pch";
 				INFOPLIST_FILE = "BSTest/BSTest-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = com.tms.BSTest;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				WRAPPER_EXTENSION = app;
 			};
@@ -493,9 +500,11 @@
 				CODE_SIGN_ENTITLEMENTS = BSTest/BSTest.entitlements;
 				CODE_SIGN_IDENTITY = "Mac Developer";
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = YEL2G7AHNU;
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = "BSTest/BSTest-Prefix.pch";
 				INFOPLIST_FILE = "BSTest/BSTest-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = com.tms.BSTest;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				WRAPPER_EXTENSION = app;
 			};

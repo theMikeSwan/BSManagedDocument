@@ -256,6 +256,12 @@
 			attributes = {
 				LastUpgradeCheck = 0450;
 				ORGANIZATIONNAME = "Jungle Candy Software";
+				TargetAttributes = {
+					AD9362661681C29000B4FA9C = {
+						DevelopmentTeam = YEL2G7AHNU;
+						ProvisioningStyle = Automatic;
+					};
+				};
 			};
 			buildConfigurationList = AD9362611681C29000B4FA9C /* Build configuration list for PBXProject "BSTestArc" */;
 			compatibilityVersion = "Xcode 3.2";
@@ -478,11 +484,15 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = BSTestArc/BSTestArc.entitlements;
 				CODE_SIGN_IDENTITY = "Mac Developer";
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = YEL2G7AHNU;
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = "BSTestArc/BSTestArc-Prefix.pch";
 				INFOPLIST_FILE = "BSTestArc/BSTestArc-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = com.tms.BSTestArc;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				WRAPPER_EXTENSION = app;
 			};
 			name = Debug;
@@ -492,11 +502,15 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = BSTestArc/BSTestArc.entitlements;
 				CODE_SIGN_IDENTITY = "Mac Developer";
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = YEL2G7AHNU;
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = "BSTestArc/BSTestArc-Prefix.pch";
 				INFOPLIST_FILE = "BSTestArc/BSTestArc-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = com.tms.BSTestArc;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				WRAPPER_EXTENSION = app;
 			};
 			name = Release;
