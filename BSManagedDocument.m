@@ -378,50 +378,12 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
         }
         else if (saveOperation == NSSaveAsOperation)
         {
-            result = [self createPackageDirectoriesAtURL:url
-                                                  ofType:typeName
-                                        forSaveOperation:saveOperation
-                                     originalContentsURL:originalContentsURL
-                                                   error:error];
-            if (!result) return NO;
-            
-            /*  Save As for an existing store should be special, migrating the store instead of saving
-             However, in our testing it can cause the next save to blow up if you go:
-             
-             1. New doc
-             2. Autosave
-             3. Save (As)
-             4. Save
-             
-             The last step will throw an exception claiming "Object's persistent store is not reachable from this NSManagedObjectContext's coordinator".
-             
-             
-             NSPersistentStoreCoordinator *coordinator = [_store persistentStoreCoordinator];
-             
-             [coordinator lock]; // so it knows it's in use
-             @try
-             {
-             NSPersistentStore *migrated = [coordinator migratePersistentStore:_store
-             toURL:storeURL
-             options:nil
-             withType:[self persistentStoreTypeForFileType:typeName]
-             error:error];
-             
-             if (!migrated) return NO;
-             
-             _store = migrated;
-             }
-             @finally
-             {
-             [coordinator unlock];
-             }
-             */
-            
-            // Instead, we shall fallback to copying the store to the new location
+            // Copy the whole package to the new location, not just the store content
             // -writeStoreContent… routine will adjust store URL for us
-            if (![[NSFileManager defaultManager] copyItemAtURL:[self.class persistentStoreURLForDocumentURL:self.mostRecentlySavedFileURL]
-                                                         toURL:storeURL
-                                                         error:error]) return NO;
+            if (![self writeBackupToURL:url error:error])
+            {
+                return NO;
+            }
         }
         else
         {
