@@ -159,7 +159,7 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
         [context performBlockAndWait:^{
             NSPersistentStoreCoordinator *storeCoordinator = context.persistentStoreCoordinator;
 
-            _store = [storeCoordinator addPersistentStoreWithType:[self persistentStoreTypeForFileType:fileType]
+            self->_store = [storeCoordinator addPersistentStoreWithType:[self persistentStoreTypeForFileType:fileType]
                                                     configuration:configuration
                                                               URL:storeURL
                                                           options:storeOptions
@@ -271,7 +271,7 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
             
             __block BOOL result;
             [context performBlockAndWait:^{
-                result = [context.persistentStoreCoordinator removePersistentStore:_store error:outError];
+                result = [context.persistentStoreCoordinator removePersistentStore:self->_store error:outError];
             }];
 
         _store = nil;
@@ -336,7 +336,7 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
         BOOL result = YES;
         NSURL *storeURL = [self.class persistentStoreURLForDocumentURL:url];
         
-        if (!_store)
+        if (!self->_store)
         {
             result = [self createPackageDirectoriesAtURL:url
                                                   ofType:typeName
@@ -456,7 +456,7 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
         // Restore persistent store URL after Save To-type operations. Even if save failed (just to be on the safe side)
         if (saveOperation == NSSaveToOperation)
         {
-            if (![[_store persistentStoreCoordinator] setURL:originalContentsURL forPersistentStore:_store])
+            if (![[self->_store persistentStoreCoordinator] setURL:originalContentsURL forPersistentStore:self->_store])
             {
                 NSLog(@"Failed to reset store URL after Save To Operation");
             }
@@ -517,14 +517,14 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
     //  * If autosaving while quitting, calling -performActivity… here results in deadlock
     [self performAsynchronousFileAccessUsingBlock:^(void (^fileAccessCompletionHandler)(void)) {
         
-        NSAssert(_contents == nil, @"Can't begin save; another is already in progress. Perhaps you forgot to wrap the call inside of -performActivityWithSynchronousWaiting:usingBlock:");
+        NSAssert(self->_contents == nil, @"Can't begin save; another is already in progress. Perhaps you forgot to wrap the call inside of -performActivityWithSynchronousWaiting:usingBlock:");
         
         
         // Stash contents temporarily into an ivar so -writeToURL:… can access it from the worker thread
         NSError *error = nil ;
-        _contents = [self contentsForURL:url ofType:typeName saveOperation:saveOperation error:&error];
+        self->_contents = [self contentsForURL:url ofType:typeName saveOperation:saveOperation error:&error];
         
-        if (!_contents)
+        if (!self->_contents)
         {
             // The docs say "be sure to invoke super", but by my understanding it's fine not to if it's because of a failure, as the filesystem hasn't been touched yet.
             fileAccessCompletionHandler();
@@ -550,7 +550,7 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
             {
                 [self performActivityWithSynchronousWaiting:NO usingBlock:^(void (^activityCompletionHandler)(void)) {
                     
-                    _contents = nil;
+                    self->_contents = nil;
                     
                     dispatch_async(dispatch_get_main_queue(), ^{
                         activityCompletionHandler();
@@ -559,7 +559,7 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
             }
             else
             {
-                _contents = nil;
+                self->_contents = nil;
             }
 			
 			
@@ -940,6 +940,7 @@ originalContentsURL:(NSURL *)originalContentsURL
              "Too many arguments to function call, expected 0, have 5"
              I chose the answer by Sahil Kapoor, which allows me to leave
              the Build Setting ON and not fight with future Xcode updates. */
+            // FIXME: This causes a bad access crash everytime a document closes.
             id (*typed_msgSend)(id, SEL, id, BOOL, void*) = (void *)objc_msgSend;
             typed_msgSend(delegate, shouldCloseSelector, self, shouldClose, contextInfo);
 //>>>>>>> jer
