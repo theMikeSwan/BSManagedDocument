@@ -28,7 +28,6 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
 @property(nonatomic, copy) NSURL *autosavedContentsTempDirectoryURL;
 @end
 
-
 @implementation BSManagedDocument
 
 #pragma mark UIManagedDocument-inspired methods
@@ -90,9 +89,9 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
     if (!_managedObjectContext)
     {
         NSManagedObjectContext *context = [[self.class.managedObjectContextClass alloc] initWithConcurrencyType:NSMainQueueConcurrencyType];
-        if(context.undoManager == nil) {
-            context.undoManager = [[NSUndoManager alloc] init];
-        }
+//        if(context.undoManager == nil) {
+//            context.undoManager = [[NSUndoManager alloc] init];
+//        }
         
         [self setManagedObjectContext:context];
     }
@@ -113,9 +112,43 @@ NSString* BSManagedDocumentDidSaveNotification = @"BSManagedDocumentDidSaveNotif
     [context setParentContext:parentContext];
 
     _managedObjectContext = context;
-    
-    [super setUndoManager:[context undoManager]]; // has to be super as we implement -setUndoManager: to be a no-op
+    /*
+     Thanks to macOS 10.14 if we so much as look at the undoManager on the same run loop as when the context was created we get a crash.
+     Delaying it for a single run loop seems to solve the issue.
+     It might have caused a secondary issue where documents that were open at quit don't reopen on relaunch. Makes no sense that those things would be related though…
+     Even better performSelector, and scheduled timers with a selector or block never fire on 10.14.
+     As a result I have had to move the undo manager setup into showWindows as it is the only thing that seems to always get called.
+     -MS
+     */
+//    [self performSelector:@selector(setupUndo) withObject:nil afterDelay:0];
     // See note JK20170624 at end of file
+}
+
+/**
+ Gets the `undoManager` on the context to have a value and makes sure it matches the document's.
+ 
+ The placement of this method is tricky on 10.14 as if you do it in the same run loop as the context's creation you will get a crash when trying to access `undoManager`. To further complicate things `performSelector: withObject: afterDelay:` and any `NSTimer` tricks don't seem to work on 10.14 as this method never gets called. For the moment this method gets called in `-showWindows`.
+ */
+- (void) setupUndo {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // If the context doesn't have an undo manager but the document does we can assign the document's to the context
+        if (self.undoManager != nil) {
+            self->_managedObjectContext.undoManager = self.undoManager;
+            // If both undo managers are nil create one and assign it to both
+        } else if (self->_managedObjectContext.undoManager == nil) {
+            NSUndoManager *undoManager = [[NSUndoManager alloc] init];
+            self->_managedObjectContext.undoManager = undoManager;
+            [super setUndoManager:undoManager];
+            // The context has an undo manager but the document doesn't
+        } else {
+            [super setUndoManager:[self->_managedObjectContext undoManager]];
+        }
+    });
+}
+
+- (void)showWindows{
+    [self setupUndo]; // Terrible place to put this but 10.14 doesn't give us much choice.
+    [super showWindows];
 }
 
 // Having this method is a bit of a hack for Sandvox's benefit. I intend to remove it in favour of something neater
@@ -971,7 +1004,7 @@ originalContentsURL:(NSURL *)originalContentsURL
 }
 
 #pragma mark Duplicating Documents
-
+#warning Sometimes deadlocks the app with 0% CPU usage and 0 energy impact
 - (NSDocument *)duplicateAndReturnError:(NSError **)outError;
 {
     // If the doc is brand new, have to force the autosave to write to disk
@@ -1074,6 +1107,11 @@ originalContentsURL:(NSURL *)originalContentsURL
 	}
     
     return result;
+}
+
+// This does much more than just tell the system to autosave in place, it changes the file menu and adds when yes adds the extras to the window title bar. For some reason it also makes revert work…
++ (BOOL)autosavesInPlace {
+    return YES;
 }
 
 @end
